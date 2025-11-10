@@ -8,7 +8,7 @@ This project provides scripts to extract organizations and targets (repositories
 
 The extraction and import tool consists of two Python scripts:
 1. **`org_extraction.py`** - Extracts organization data from a source Snyk group
-2. **`snyk_extract_targets.py`** - Extracts targets (repositories) from source organizations for import into target organizations
+2. **`targets_extraction.py`** - Extracts targets (repositories) from source organizations for import into target organizations. Supports filtering by specific integration types (GitHub, GitHub Enterprise, GitHub Cloud App, or GitLab)
 
 ## Prerequisites
 
@@ -57,18 +57,19 @@ pip install -r requirements.txt
 Set the following environment variables before running the scripts:
 
 ```bash
-export SOURCE_SNYK_API_TOKEN="your-source-snyk-api-token"
+export SNYK_TOKEN="your-snyk-api-token"
+export GITLAB_API_TOKEN="your-gitlab-api-token"  # Required only for GitLab targets
+
+# Required for org_extraction.py
+export SOURCE_GROUP_ID="your-source-group-id"
+export TARGET_GROUP_ID="your-target-group-id"
+export TEMPLATE_ORG_ID="your-template-org-id"  # Organization in target group to copy settings from
+
+# Required for all scripts - directory where files will be read from and written to
+export SNYK_LOG_PATH="/path/to/snyk-logs"
 ```
 
-### Script Configuration
-
-Update the configuration constants in `org_extraction.py`:
-
-```python
-TARGET_GROUP_ID = "your-target-group-id"
-SOURCE_GROUP_ID = "your-source-group-id"  
-TEMPLATE_ORG_ID = "your-template-org-id"  # Organization in target group to copy settings from
-```
+**Note:** The `GITLAB_API_TOKEN` is only required when extracting GitLab targets using `--source gitlab`. The script needs this token to call the GitLab API and retrieve project IDs for proper import formatting. You can omit this token if you're only extracting GitHub-based targets.
 
 ## How To Run Script
 
@@ -79,14 +80,21 @@ The complete extraction and import process involves 4 steps. Steps 1 & 3 use the
 Extract organization data from the source tenant and prepare organization definitions for recreation in the target tenant.
 
 **Prerequisites:**
-- Update configuration constants in `org_extraction.py`:
-  - Replace `SOURCE_GROUP_ID` with your source group ID
-  - Replace `TARGET_GROUP_ID` with your target group ID  
-  - Replace `TEMPLATE_ORG_ID` with your template organization ID
+- Set the required environment variables (see Configuration section above)
 
 **Terminal Commands:**
 ```bash
-export SOURCE_SNYK_API_TOKEN="your-source-tenant-api-token"
+# Set the required environment variables
+export SNYK_TOKEN="your-source-tenant-api-token"
+export SOURCE_GROUP_ID="your-source-group-id"
+export TARGET_GROUP_ID="your-target-group-id"
+export TEMPLATE_ORG_ID="your-template-org-id"
+export SNYK_LOG_PATH="/path/to/snyk-logs"
+
+# Create the log directory
+mkdir -p /path/to/snyk-logs
+
+# Run the extraction script
 python3 org_extraction.py
 ```
 
@@ -111,25 +119,39 @@ export SNYK_LOG_PATH=""/path/to/snyk-logs""
 mkdir -p /path/to/snyk-logs
 
 # Create organizations
-DEBUG=snyk* snyk-api-import orgs:create --file="snyk-orgs-to-create.json"
+DEBUG=snyk* snyk-api-import orgs:create --file="$SNYK_LOG_PATH/snyk-orgs-to-create.json"
 ```
 
-**Output:** Generates `snyk-created-orgs.json` file (move this file to the repository directory)
+**Output:** Generates `snyk-created-orgs.json` file in the SNYK_LOG_PATH directory
 
 ### Step 3: Extract Targets from Source Organizations
 
-Extract targets (repositories) from the source organizations for import.
+Extract targets (repositories) from the source organizations for import. You must specify which integration type to extract targets from.
 
 **Terminal Commands:**
 ```bash
-python3 snyk_extract_targets.py
+# Extract GitHub targets
+python3 targets_extraction.py --source github
+
+# Extract GitHub Enterprise targets
+python3 targets_extraction.py --source github-enterprise
+
+# Extract GitHub Cloud App targets
+python3 targets_extraction.py --source github-cloud-app
+
+# Extract GitLab targets
+python3 targets_extraction.py --source gitlab
 ```
+
 
 **Prerequisites:**
 - `snyk-orgs-to-create.json` (from Step 1)
 - `snyk-created-orgs.json` (from Step 2)
+- For GitLab targets: `GITLAB_API_TOKEN` environment variable must be set
 
 **Output:** Creates `snyk-import-targets.json` ready for import
+
+**Note:** Run the script multiple times with different `--source` values if you need to extract targets from multiple integration types. Each run will create a separate output file for that integration type.
 
 ### Step 4: Import Targets to Target Organizations
 
@@ -137,10 +159,10 @@ Use the API Import Tool to import all targets and create projects in the target 
 
 **Terminal Commands:**
 ```bash
-snyk-api-import import --file=snyk-import-targets.json
+snyk-api-import import --file="$SNYK_LOG_PATH/snyk-import-targets.json"
 ```
 
-**Post-Import:** Check logs in `/path/to/snyk-logs` for any project import failures that may need manual attention.
+**Post-Import:** Check logs in `$SNYK_LOG_PATH` for any project import failures that may need manual attention.
 
 ## File Structure
 
@@ -148,14 +170,14 @@ snyk-api-import import --file=snyk-import-targets.json
 snyk-org-project-migration/
 ├── README.md                    # This file
 ├── org_extraction.py            # Phase 1: Organization extraction
-├── snyk_extract_targets.py      # Phase 2: Target extraction
+├── targets_extraction.py        # Phase 2: Target extraction
 ├── requirements.txt             # Python dependencies (optional)
 ├── venv/                        # Virtual environment (created)
-└── Output files:
+└── $SNYK_LOG_PATH/              # Output directory (set by environment variable)
     ├── snyk-orgs-to-create.json    # Phase 1 output
-    ├── snyk-created-orgs.json      # Manual input for Phase 2
+    ├── snyk-created-orgs.json      # Phase 2 input (generated by snyk-api-import)
     ├── snyk-source-orgs.json       # Source org references
-    └── snyk-import-targets.json    # Phase 2 output
+    └── snyk-import-targets.json    # Phase 3 output
 ```
 
 ## Dependencies

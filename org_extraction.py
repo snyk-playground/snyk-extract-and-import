@@ -5,8 +5,20 @@ This script extracts organization data from a source Snyk group and prepares
 it for migration to a target group. It creates a JSON file containing both
 the organizations to create and source organization references.
 
+Required environment variables:
+    SNYK_TOKEN: API token for the source Snyk tenant
+    SOURCE_GROUP_ID: ID of the source Snyk group to extract organizations from
+    TARGET_GROUP_ID: ID of the target Snyk group where organizations will be created
+    TEMPLATE_ORG_ID: ID of the template organization in target group to copy settings from
+    SNYK_LOG_PATH: Directory path where output files will be written
+
 Usage:
-    Set SOURCE_SNYK_API_TOKEN environment variable and run the script.
+    export SNYK_TOKEN="your-snyk-api-token"
+    export SOURCE_GROUP_ID="your-source-group-id"
+    export TARGET_GROUP_ID="your-target-group-id"
+    export TEMPLATE_ORG_ID="your-template-org-id"
+    export SNYK_LOG_PATH="/path/to/snyk-logs"
+    python3 org_extraction.py
     
 Output:
     Creates snyk-orgs-to-create.json with organization migration data.
@@ -20,12 +32,16 @@ from typing import List, Dict, Any
 import requests
 
 
-# Configuration Constants
-TARGET_GROUP_ID = "TARGET_GROUP_ID"
-SOURCE_GROUP_ID = "SOURCE_GROUP_ID"
-TEMPLATE_ORG_ID = "TEMPLATE_ORG_ID"  #This is the organization in target group to copy settings from
+# Configuration from environment variables
+TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")
+SOURCE_GROUP_ID = os.getenv("SOURCE_GROUP_ID")
+TEMPLATE_ORG_ID = os.getenv("TEMPLATE_ORG_ID")  # This is the organization in target group to copy settings from
+SNYK_LOG_PATH = os.getenv("SNYK_LOG_PATH", ".")  # Default to current directory if not set
 API_VERSION = "2024-06-18"
+
+# File paths (will be combined with SNYK_LOG_PATH)
 OUTPUT_FILE = "snyk-orgs-to-create.json"
+SOURCE_ORGS_FILE = "snyk-source-orgs.json"
 
 
 def get_api_headers(api_token: str) -> Dict[str, str]:
@@ -125,25 +141,28 @@ def create_migration_data(source_orgs: List[Dict[str, Any]]) -> Dict[str, List[D
 
 def save_migration_data(migration_data: Dict[str, List[Dict[str, Any]]], filename: str = OUTPUT_FILE) -> None:
     """
-    Save migration data to JSON files.
+    Save migration data to JSON files in the SNYK_LOG_PATH directory.
     
     Args:
         migration_data: The migration data structure to save
         filename: Output filename for org creation data (default: OUTPUT_FILE constant)
     """
     try:
+        # Create full path for output file
+        output_path = os.path.join(SNYK_LOG_PATH, filename)
+        source_path = os.path.join(SNYK_LOG_PATH, SOURCE_ORGS_FILE)
+        
         # Save org creation data (clean format for org creation)
         org_creation_data = {"orgs": migration_data["orgs"]}
-        with open(filename, "w", encoding="utf-8") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(org_creation_data, f, indent=2, ensure_ascii=False)
-        print(f"Successfully saved organization creation data to {filename}")
+        print(f"Successfully saved organization creation data to {output_path}")
         
         # Save source org data separately for target extraction
-        source_filename = "snyk-source-orgs.json"
         source_data = {"sourceOrgs": migration_data["sourceOrgs"]}
-        with open(source_filename, "w", encoding="utf-8") as f:
+        with open(source_path, "w", encoding="utf-8") as f:
             json.dump(source_data, f, indent=2, ensure_ascii=False)
-        print(f"Successfully saved source organization data to {source_filename}")
+        print(f"Successfully saved source organization data to {source_path}")
         
     except IOError as e:
         print(f"Error saving files: {e}")
@@ -152,11 +171,41 @@ def save_migration_data(migration_data: Dict[str, List[Dict[str, Any]]], filenam
 
 def main() -> None:
     """Main execution function."""
-    # Check for required environment variable
-    source_api_token = os.getenv("SOURCE_SNYK_API_TOKEN")
+    # Check for required environment variables
+    source_api_token = os.getenv("SNYK_TOKEN")
     if not source_api_token:
-        print("Error: SOURCE_SNYK_API_TOKEN environment variable is required")
+        print("Error: SNYK_TOKEN environment variable is required")
         print("Please set it with your Snyk API token and try again")
+        sys.exit(1)
+    
+    # Check for required configuration environment variables
+    missing_vars = []
+    if not TARGET_GROUP_ID:
+        missing_vars.append("TARGET_GROUP_ID")
+    if not SOURCE_GROUP_ID:
+        missing_vars.append("SOURCE_GROUP_ID")
+    if not TEMPLATE_ORG_ID:
+        missing_vars.append("TEMPLATE_ORG_ID")
+    if not os.getenv("SNYK_LOG_PATH"):
+        missing_vars.append("SNYK_LOG_PATH")
+    
+    if missing_vars:
+        print("Error: The following environment variables are required:")
+        for var in missing_vars:
+            print(f"  - {var}")
+        print("\nPlease set them and try again:")
+        print("  export TARGET_GROUP_ID='your-target-group-id'")
+        print("  export SOURCE_GROUP_ID='your-source-group-id'")
+        print("  export TEMPLATE_ORG_ID='your-template-org-id'")
+        print("  export SNYK_LOG_PATH='/path/to/snyk-logs'")
+        sys.exit(1)
+    
+    # Ensure the log directory exists
+    try:
+        os.makedirs(SNYK_LOG_PATH, exist_ok=True)
+        print(f"Output directory: {SNYK_LOG_PATH}")
+    except Exception as e:
+        print(f"Error: Unable to create output directory {SNYK_LOG_PATH}: {e}")
         sys.exit(1)
     
     try:
@@ -185,8 +234,8 @@ def main() -> None:
         print("\n=== EXTRACTION SUMMARY ===")
         print(f"Organizations to create: {org_count}")
         print(f"Source references saved: {source_count}")
-        print(f"Org creation file: {OUTPUT_FILE}")
-        print(f"Source data file: snyk-source-orgs.json")
+        print(f"Org creation file: {os.path.join(SNYK_LOG_PATH, OUTPUT_FILE)}")
+        print(f"Source data file: {os.path.join(SNYK_LOG_PATH, SOURCE_ORGS_FILE)}")
         print("Ready for organization creation step!")
         
     except Exception as e:
