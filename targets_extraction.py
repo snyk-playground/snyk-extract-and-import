@@ -179,18 +179,19 @@ def get_target_org_mapping():
 
 def get_source_orgs_from_json():
     """
-    Load source organization data from the source organizations JSON file.
+    Load source organization data from the source organizations JSON file in SNYK_LOG_PATH.
     
     Returns:
         list: List of source organization data
     """
     try:
-        with open(SOURCE_ORGS_FILE, "r") as f:
+        source_file_path = os.path.join(SNYK_LOG_PATH, SOURCE_ORGS_FILE)
+        with open(source_file_path, "r") as f:
             data = json.load(f)
         return data.get("sourceOrgs", [])
         
     except FileNotFoundError:
-        print(f"ERROR: {SOURCE_ORGS_FILE} not found.")
+        print(f"ERROR: {source_file_path} not found.")
         print("Please run org_extraction.py first to generate this file.")
         return []
 
