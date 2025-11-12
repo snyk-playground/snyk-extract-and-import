@@ -8,7 +8,7 @@ This project provides scripts to extract organizations and targets (repositories
 
 The extraction and import tool consists of two Python scripts:
 1. **`org_extraction.py`** - Extracts organization data from a source Snyk group
-2. **`snyk_extract_targets.py`** - Extracts targets (repositories) from source organizations for import into target organizations
+2. **`targets_extraction.py`** - Extracts targets (repositories) from source organizations for import into target organizations. Supports filtering by specific integration types (GitHub, GitHub Enterprise, GitHub Cloud App, or GitLab)
 
 ## Prerequisites
 
@@ -29,10 +29,10 @@ cd /path/to/snyk-extract-and-import
 Create and activate a virtual environment:
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On macOS/Linux
+python -m venv .venv
+source .venv/bin/activate  # On macOS/Linux
 # or
-venv\Scripts\activate  # On Windows
+.venv\Scripts\activate  # On Windows
 ```
 
 ### 3. Install Dependencies
@@ -40,13 +40,6 @@ venv\Scripts\activate  # On Windows
 Install the required Python packages:
 
 ```bash
-pip install requests
-```
-
-Alternatively, you can create a `requirements.txt` file:
-
-```bash
-echo "requests>=2.25.0" > requirements.txt
 pip install -r requirements.txt
 ```
 
@@ -57,18 +50,26 @@ pip install -r requirements.txt
 Set the following environment variables before running the scripts:
 
 ```bash
-export SOURCE_SNYK_API_TOKEN="your-source-snyk-api-token"
+export SNYK_TOKEN="your-snyk-api-token"
+export GITLAB_API_TOKEN="your-gitlab-api-token"  # Required only for GitLab targets
+
+# Required for org_extraction.py
+export SOURCE_GROUP_ID="your-source-group-id"
+export TARGET_GROUP_ID="your-target-group-id"
+export TEMPLATE_ORG_ID="your-template-org-id"  # Organization in target group to copy settings from
+
+# Required for all scripts - directory where files will be read from and written to
+export SNYK_LOG_PATH="/path/to/snyk-logs"
+
+# Create the log directory
+mkdir -p "$SNYK_LOG_PATH"
 ```
 
-### Script Configuration
+**Note:** The `GITLAB_API_TOKEN` is only required when extracting GitLab targets using `--source gitlab`. The script needs this token to call the GitLab API and retrieve project IDs for proper import formatting. You can omit this token if you're only extracting GitHub-based targets.
 
-Update the configuration constants in `org_extraction.py`:
-
-```python
-TARGET_GROUP_ID = "your-target-group-id"
-SOURCE_GROUP_ID = "your-source-group-id"  
-TEMPLATE_ORG_ID = "your-template-org-id"  # Organization in target group to copy settings from
-```
+> **📂 File Output Notice**
+> 
+> All generated files are automatically saved to the directory specified by the `SNYK_LOG_PATH` environment variable. Make sure this directory exists and is writable before running any scripts.
 
 ## How To Run Script
 
@@ -79,21 +80,17 @@ The complete extraction and import process involves 4 steps. Steps 1 & 3 use the
 Extract organization data from the source tenant and prepare organization definitions for recreation in the target tenant.
 
 **Prerequisites:**
-- Update configuration constants in `org_extraction.py`:
-  - Replace `SOURCE_GROUP_ID` with your source group ID
-  - Replace `TARGET_GROUP_ID` with your target group ID  
-  - Replace `TEMPLATE_ORG_ID` with your template organization ID
+- Set the required environment variables (see Configuration section above)
 
 **Terminal Commands:**
 ```bash
-export SOURCE_SNYK_API_TOKEN="your-source-tenant-api-token"
+# Run the extraction script
 python3 org_extraction.py
 ```
 
-**Output:** Creates `snyk-orgs-to-create.json` file
+**Output:** Creates `snyk-orgs-to-create.json` file in the `$SNYK_LOG_PATH` directory
 
 **Important:** Keep the source default organization from the file. Make sure the target group's default organization name matches the source group's default organization name so targets map properly (names should match by default).
-
 ### Step 2: Create Organizations in Target Tenant
 
 Use Snyk's API Import Tool to recreate the organizations in the target tenant.
@@ -103,33 +100,40 @@ Use Snyk's API Import Tool to recreate the organizations in the target tenant.
 # Install the API Import Tool
 npm install -g snyk-api-import
 
-# Set environment variables for target tenant
-export SNYK_TOKEN="your-target-tenant-api-token"
-export SNYK_LOG_PATH=""/path/to/snyk-logs""
-
-# Create log directory
-mkdir -p /path/to/snyk-logs
-
 # Create organizations
-DEBUG=snyk* snyk-api-import orgs:create --file="snyk-orgs-to-create.json"
+DEBUG=snyk* snyk-api-import orgs:create --file="$SNYK_LOG_PATH/snyk-orgs-to-create.json"
 ```
 
-**Output:** Generates `snyk-created-orgs.json` file (move this file to the repository directory)
+**Output:** Generates `snyk-created-orgs.json` file in the SNYK_LOG_PATH directory
 
 ### Step 3: Extract Targets from Source Organizations
 
-Extract targets (repositories) from the source organizations for import.
+Extract targets (repositories) from the source organizations for import. You must specify which integration type to extract targets from.
 
 **Terminal Commands:**
 ```bash
-python3 snyk_extract_targets.py
+# Extract GitHub targets
+python3 targets_extraction.py --source github
+
+# Extract GitHub Enterprise targets
+python3 targets_extraction.py --source github-enterprise
+
+# Extract GitHub Cloud App targets
+python3 targets_extraction.py --source github-cloud-app
+
+# Extract GitLab targets
+python3 targets_extraction.py --source gitlab
 ```
+
 
 **Prerequisites:**
 - `snyk-orgs-to-create.json` (from Step 1)
 - `snyk-created-orgs.json` (from Step 2)
+- For GitLab targets: `GITLAB_API_TOKEN` environment variable must be set
 
-**Output:** Creates `snyk-import-targets.json` ready for import
+**Output:** Creates `snyk-import-targets.json` ready for import in the `$SNYK_LOG_PATH` directory
+
+**Note:** Run the script multiple times with different `--source` values if you need to extract targets from multiple integration types. Each run will create a separate output file for that integration type.
 
 ### Step 4: Import Targets to Target Organizations
 
@@ -137,26 +141,10 @@ Use the API Import Tool to import all targets and create projects in the target 
 
 **Terminal Commands:**
 ```bash
-snyk-api-import import --file=snyk-import-targets.json
+snyk-api-import import --file="$SNYK_LOG_PATH/snyk-import-targets.json"
 ```
 
-**Post-Import:** Check logs in `/path/to/snyk-logs` for any project import failures that may need manual attention.
-
-## File Structure
-
-```
-snyk-org-project-migration/
-├── README.md                    # This file
-├── org_extraction.py            # Phase 1: Organization extraction
-├── snyk_extract_targets.py      # Phase 2: Target extraction
-├── requirements.txt             # Python dependencies (optional)
-├── venv/                        # Virtual environment (created)
-└── Output files:
-    ├── snyk-orgs-to-create.json    # Phase 1 output
-    ├── snyk-created-orgs.json      # Manual input for Phase 2
-    ├── snyk-source-orgs.json       # Source org references
-    └── snyk-import-targets.json    # Phase 2 output
-```
+**Post-Import:** Check logs in `$SNYK_LOG_PATH` for any project import failures that may need manual attention.
 
 ## Dependencies
 
@@ -166,10 +154,13 @@ snyk-org-project-migration/
 
 ### Built-in Python Modules
 
+- **argparse** - Command-line argument parsing (used in `targets_extraction.py`)
 - **json** - JSON parsing and manipulation
-- **os** - Environment variable access
-- **sys** - System operations
-- **typing** - Type hints support
+- **os** - Environment variable access and file system operations
+- **sys** - System operations (used in `org_extraction.py`)
+- **time** - Time-related functions (used for API rate limiting)
+- **typing** - Type hints support (used in `org_extraction.py`)
+- **urllib.parse** - URL parsing utilities (used for GitLab API integration)
 
 ## API Permissions
 
