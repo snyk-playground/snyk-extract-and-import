@@ -175,12 +175,3 @@ Ensure your Snyk API tokens have the following permissions:
 - Write access to target group
 - Organization creation permissions
 
-### Debug Mode
-
-Enable verbose logging by modifying the scripts to include debug prints:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
